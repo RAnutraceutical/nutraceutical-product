@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Nutraceutical Product | Wellness Store</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+:root{--green:#087f5b;--dark:#12352b;--bg:#f5f8f6;--muted:#68786f;--line:#e2ebe5}
+*{box-sizing:border-box}body{margin:0;font-family:Arial,sans-serif;background:var(--bg);color:#17231d}
+header{background:#fff;padding:16px;border-bottom:1px solid var(--line);position:sticky;top:0;z-index:5}
+.wrap{max-width:1100px;margin:auto;padding:16px}.brand{font-weight:800;color:var(--dark);font-size:21px}.sub{font-size:12px;color:var(--muted);margin-top:4px}
+.hero{background:linear-gradient(120deg,#e5f5eb,#f7fbf8);padding:24px;border-radius:18px;margin:10px 0 18px}.hero h1{margin:0 0 8px;font-size:26px}.hero p{margin:0;color:#50665a}
+.row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}.row>*{flex:1}
+input,select,textarea,button{font:inherit;padding:12px;border:1px solid #d5e1d9;border-radius:10px;background:white;min-width:0}
+button{background:var(--green);color:white;border:0;font-weight:700;cursor:pointer}button.secondary{background:#e8f3ec;color:var(--dark)}button.danger{background:#b42318}
+.filters{display:flex;gap:8px;overflow:auto;margin:14px 0}.filters button{white-space:nowrap}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(155px,1fr));gap:12px}
+.card{background:white;border:1px solid var(--line);border-radius:14px;padding:13px}
+.pic{height:105px;background:#edf6ef;border-radius:10px;display:grid;place-items:center;font-size:42px;overflow:hidden}
+.pic img{width:100%;height:100%;object-fit:cover}.card h3{font-size:15px;margin:10px 0 5px}.muted{color:var(--muted);font-size:12px}.price{font-weight:800;margin:9px 0}.card button{width:100%;padding:10px}
+.panel{background:white;border:1px solid var(--line);border-radius:14px;padding:15px;margin:14px 0}.hidden{display:none!important}
+footer{text-align:center;color:var(--muted);font-size:12px;padding:24px}
+.cartline{display:flex;justify-content:space-between;gap:8px;border-bottom:1px solid var(--line);padding:9px 0}
+@media(min-width:700px){.hero h1{font-size:34px}.grid{grid-template-columns:repeat(auto-fill,minmax(205px,1fr))}}
+</style>
+</head>
+<body>
+<header><div class="wrap" style="padding:0 16px"><div class="brand">NUTRACEUTICAL PRODUCT</div><div class="sub">WELLNESS · NUTRITION · CARE</div></div></header>
+<main class="wrap">
+<section class="hero"><h1>Wellness essentials, made simple</h1><p>Explore vitamins, protein and herbal wellness products.</p></section>
+<div class="row"><input id="search" placeholder="Search products..." oninput="renderProducts()"><button class="secondary" onclick="toggleCart()">Cart (<span id="cartCount">0</span>)</button><button class="secondary" onclick="showAdmin()">Admin</button></div>
+<div id="categories" class="filters"></div>
+<section id="products" class="grid"></section>
+<section id="cartPanel" class="panel hidden"><h2>Your cart</h2><div id="cartItems"></div><p id="cartTotal"></p><p class="muted">Demo cart only. Online payment and order placement are not enabled yet.</p><button class="secondary" onclick="toggleCart()">Continue shopping</button></section>
+<section id="adminPanel" class="panel hidden">
+<h2>Admin panel</h2>
+<div id="loginBox"><p class="muted">Sign in using the admin email and password you created in Supabase Authentication.</p><input id="email" type="email" placeholder="Admin email"><input id="password" type="password" placeholder="Password"><button onclick="adminLogin()">Sign in</button><p id="loginMsg" class="muted"></p></div>
+<div id="adminArea" class="hidden">
+<div class="row"><strong>Manage products</strong><button class="secondary" onclick="adminLogout()">Sign out</button></div>
+<form id="productForm" onsubmit="saveProduct(event)">
+<input id="pname" placeholder="Product name" required>
+<select id="pcat" required><option value="">Select category</option></select>
+<textarea id="pdesc" placeholder="Description"></textarea>
+<div class="row"><input id="pprice" type="number" min="0" step="0.01" placeholder="Price (₹)" required><input id="pcompare" type="number" min="0" step="0.01" placeholder="MRP (optional)"></div>
+<div class="row"><input id="pstock" type="number" min="0" step="1" placeholder="Stock quantity" value="0"><input id="pimage" type="url" placeholder="Image URL (optional)"></div>
+<button type="submit">Save product</button><button type="button" class="secondary" onclick="resetForm()">Clear</button>
+<input id="editId" type="hidden">
+</form>
+<h3>Products in database</h3><div id="adminProducts"></div>
+<h3>Add category</h3><div class="row"><input id="newCategory" placeholder="Category name"><button onclick="addCategory()">Add</button></div>
+<p id="adminMsg" class="muted"></p>
+</div></section>
+</main>
+<footer>Product information is for general wellness. Read labels and consult a qualified professional when needed.</footer>
+<script>
+const SUPABASE_URL = "https://zprnafeyfzpzvdjortjd.supabase.co";
+const SUPABASE_PUBLISHABLE_KEY = "sb_publishable_R4zrjb-xDyUHm1P1VpsXkw_O4CFPC21";
+const db = window.supabase.createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY);
+let products=[],categories=[],activeCategory="all",cart=[],isAdmin=false;
+const $=id=>document.getElementById(id);
+const esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+async function loadData(){
+  const [pr,cr]=await Promise.all([
+    db.from("products").select("id,category_id,name,description,price,compare_at_price,stock_quantity,image_url,is_active").eq("is_active",true).order("created_at",{ascending:false}),
+    db.from("categories").select("id,name,slug,is_active").eq("is_active",true).order("name")
+  ]);
+  if(pr.error) console.error(pr.error); else products=pr.data||[];
+  if(cr.error) console.error(cr.error); else categories=cr.data||[];
+  renderCategories();renderProducts();renderCategorySelect();
+}
+function renderCategories(){
+  $("categories").innerHTML=`<button onclick="setCategory('all')">All products</button>`+categories.map(c=>`<button class="secondary" onclick="setCategory(${c.id})">${esc(c.name)}</button>`).join("");
+}
+function setCategory(id){activeCategory=id;renderProducts()}
+function renderProducts(){
+  const q=$("search").value.toLowerCase();
+  const list=products.filter(p=>(activeCategory==="all"||String(p.category_id)===String(activeCategory))&&(`${p.name} ${p.description||""}`.toLowerCase().includes(q)));
+  $("products").innerHTML=list.length?list.map(p=>`<article class="card"><div class="pic">${p.image_url?`<img src="${esc(p.image_url)}" alt="${esc(p.name)}" onerror="this.remove()">`:"🌿"}</div><h3>${esc(p.name)}</h3><div class="muted">${esc(categories.find(c=>c.id===p.category_id)?.name||"Wellness")}</div><div class="price">₹${Number(p.price).toFixed(2)}</div><div class="muted">${Number(p.stock_quantity)>0?"In stock":"Availability on request"}</div><button onclick="addToCart(${p.id})" ${Number(p.stock_quantity)<=0?"disabled":""}>Add to cart</button></article>`).join(""):'<p class="muted">No products found. Admin can add products after signing in.</p>';
+}
+function renderCategorySelect(){$("pcat").innerHTML='<option value="">Select category</option>'+categories.map(c=>`<option value="${c.id}">${esc(c.name)}</option>`).join("")}
+function addToCart(id){const p=products.find(x=>x.id===id);if(!p)return;const item=cart.find(x=>x.id===id);if(item)item.qty++;else cart.push({id, name:p.name,price:Number(p.price),qty:1});$("cartCount").textContent=cart.reduce((a,b)=>a+b.qty,0)}
+function toggleCart(){$("cartPanel").classList.toggle("hidden");renderCart()}
+function renderCart(){$("cartItems").innerHTML=cart.length?cart.map(x=>`<div class="cartline"><span>${esc(x.name)} × ${x.qty}</span><strong>₹${(x.price*x.qty).toFixed(2)}</strong></div>`).join(""):"<p>Your cart is empty.</p>";$("cartTotal").textContent="Total: ₹"+cart.reduce((a,b)=>a+b.price*b.qty,0).toFixed(2)}
+function showAdmin(){$("adminPanel").classList.toggle("hidden")}
+async function adminLogin(){
+  $("loginMsg").textContent="Signing in...";
+  const {data,error}=await db.auth.signInWithPassword({email:$("email").value.trim(),password:$("password").value});
+  if(error){$("loginMsg").textContent=error.message;return}
+  const {data:row,error:checkErr}=await db.from("admin_users").select("user_id").eq("user_id",data.user.id).maybeSingle();
+  if(checkErr||!row){await db.auth.signOut();$("loginMsg").textContent="This account is not registered as an admin.";return}
+  isAdmin=true;$("loginBox").classList.add("hidden");$("adminArea").classList.remove("hidden");await loadAdminProducts();
+}
+async function adminLogout(){await db.auth.signOut();isAdmin=false;$("adminArea").classList.add("hidden");$("loginBox").classList.remove("hidden")}
+async function loadAdminProducts(){
+  const {data,error}=await db.from("products").select("id,name,price,stock_quantity,is_active").order("created_at",{ascending:false});
+  if(error){$("adminMsg").textContent=error.message;return}
+  $("adminProducts").innerHTML=(data||[]).map(p=>`<div class="cartline"><span>${esc(p.name)} · ₹${p.price} · Stock ${p.stock_quantity}</span><span><button class="secondary" onclick="editProduct(${p.id})">Edit</button> <button class="danger" onclick="deleteProduct(${p.id})">Delete</button></span></div>`).join("")||"No products yet.";
+}
+async function saveProduct(e){
+  e.preventDefault();if(!isAdmin)return;
+  const id=$("editId").value;
+  const payload={name:$("pname").value.trim(),category_id:Number($("pcat").value),description:$("pdesc").value.trim(),price:Number($("pprice").value),compare_at_price:$("pcompare").value?Number($("pcompare").value):null,stock_quantity:Number($("pstock").value||0),image_url:$("pimage").value.trim()||null,is_active:true};
+  const result=id?await db.from("products").update(payload).eq("id",Number(id)):await db.from("products").insert(payload);
+  if(result.error){$("adminMsg").textContent=result.error.message;return}
+  $("adminMsg").textContent="Product saved.";resetForm();await loadData();await loadAdminProducts();
+}
+async function editProduct(id){
+  const {data,error}=await db.from("products").select("*").eq("id",id).single();if(error){$("adminMsg").textContent=error.message;return}
+  $("editId").value=data.id;$("pname").value=data.name;$("pcat").value=data.category_id;$("pdesc").value=data.description||"";$("pprice").value=data.price;$("pcompare").value=data.compare_at_price??"";$("pstock").value=data.stock_quantity;$("pimage").value=data.image_url||"";
+  window.scrollTo({top:$("productForm").offsetTop,behavior:"smooth"});
+}
+async function deleteProduct(id){if(!confirm("Delete this product?"))return;const {error}=await db.from("products").delete().eq("id",id);$("adminMsg").textContent=error?error.message:"Product deleted.";await loadData();await loadAdminProducts()}
+function resetForm(){$("productForm").reset();$("editId").value="";$("pstock").value=0}
+async function addCategory(){
+  if(!isAdmin)return;const name=$("newCategory").value.trim();if(!name)return;
+  const slug=name.toLowerCase().trim().replace(/[^a-z0-9]+/g,"-").replace(/^-|-$/g,"");
+  const {error}=await db.from("categories").insert({name,slug,is_active:true});
+  $("adminMsg").textContent=error?error.message:"Category added.";if(!error){$("newCategory").value="";await loadData()}
+}
+loadData();
+</script>
+</body>
+</html>
